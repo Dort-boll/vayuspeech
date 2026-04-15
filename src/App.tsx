@@ -116,6 +116,7 @@ export default function App() {
   const [wordIndex, setWordIndex] = useState(-1);
   const [toasts, setToasts] = useState<{id: number, msg: string, type: 's' | 'e' | 'i' | 'w'}[]>([]);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [isVoicesLoading, setIsVoicesLoading] = useState(true);
 
   // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -126,7 +127,8 @@ export default function App() {
     bars: 64,
     smooth: Array(64).fill(0.015),
     target: Array(64).fill(0.015),
-    time: 0
+    time: 0,
+    pulse: 0
   });
 
   // Theme Management
@@ -168,10 +170,19 @@ export default function App() {
 
   // Initialization
   useEffect(() => {
+    let kickInterval: any;
+    
     const loadVoices = () => {
-      const v = window.speechSynthesis.getVoices();
-      if (v.length > 0) {
-        setVoices(v);
+      try {
+        const v = window.speechSynthesis.getVoices();
+        if (v.length > 0) {
+          setVoices(v);
+          setIsVoicesLoading(false);
+          if (kickInterval) clearInterval(kickInterval);
+        }
+      } catch (err) {
+        console.error('Error loading voices:', err);
+        addToast('Failed to load system voices', 'e');
       }
     };
 
@@ -179,8 +190,19 @@ export default function App() {
       window.speechSynthesis.onvoiceschanged = loadVoices;
       loadVoices();
       // Some browsers need a little kick
-      setTimeout(loadVoices, 100);
+      kickInterval = setInterval(() => {
+        if (window.speechSynthesis.getVoices().length > 0) {
+          loadVoices();
+        }
+      }, 200);
+      
+      // Timeout for loading
+      setTimeout(() => {
+        setIsVoicesLoading(false);
+        if (kickInterval) clearInterval(kickInterval);
+      }, 3000);
     } else {
+      setIsVoicesLoading(false);
       addToast('Speech synthesis not supported in this browser', 'e');
     }
 
@@ -190,6 +212,7 @@ export default function App() {
 
     return () => {
       clearInterval(timer);
+      if (kickInterval) clearInterval(kickInterval);
       if (chromeBugRef.current) clearInterval(chromeBugRef.current);
       window.speechSynthesis.cancel();
     };
@@ -217,6 +240,7 @@ export default function App() {
 
       const viz = vizRef.current;
       viz.time += 0.016;
+      viz.pulse *= 0.92; // Decay pulse
 
       for (let i = 0; i < viz.bars; i++) {
         const n = i / viz.bars;
@@ -227,7 +251,8 @@ export default function App() {
           const w3 = Math.sin(viz.time * 8.3 + i * 1.2) * 0.12;
           const w4 = Math.sin(viz.time * 2.1 + i * 0.3) * 0.1;
           const ns = (Math.random() - 0.5) * 0.28;
-          viz.target[i] = Math.abs(w1 + w2 + w3 + w4 + ns) * env * 0.85 + 0.06;
+          const pulseEffect = viz.pulse * (Math.random() * 0.4 + 0.6) * env;
+          viz.target[i] = Math.abs(w1 + w2 + w3 + w4 + ns) * env * 0.85 + 0.06 + pulseEffect;
         } else {
           viz.target[i] = Math.sin(viz.time * 0.35 + i * 0.22) * 0.008 + 0.015;
         }
@@ -345,7 +370,22 @@ export default function App() {
           setCurrentWord(text);
           
           const wordsBefore = script.substring(0, e.charIndex).trim().split(/\s+/).filter(w => w.length > 0);
-          setWordIndex(wordsBefore.length);
+          const currentIdx = wordsBefore.length;
+          setWordIndex(currentIdx);
+          
+          // Trigger visualizer pulse
+          vizRef.current.pulse = 1.0;
+          
+          // Improve time accuracy based on word progress
+          const totalWords = getWordCount(script);
+          if (totalWords > 0) {
+            const progressRatio = currentIdx / totalWords;
+            const estimatedElapsed = progressRatio * totalDuration;
+            // Only sync if significantly different to avoid jitter
+            if (Math.abs(currentTime - estimatedElapsed) > 1) {
+              setCurrentTime(estimatedElapsed);
+            }
+          }
         }
       };
 
@@ -766,14 +806,17 @@ export default function App() {
                       <select 
                         value={selectedVoice}
                         onChange={(e) => setSelectedVoice(e.target.value)}
-                        className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] rounded-lg p-2 text-xs outline-none focus:border-[var(--accent)] glass"
+                        className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] rounded-lg p-2 text-xs outline-none focus:border-[var(--accent)] glass disabled:opacity-50"
+                        disabled={isVoicesLoading}
                       >
-                        <option value="">Default System Voice</option>
+                        <option value="">{isVoicesLoading ? 'Loading voices...' : 'Default System Voice'}</option>
                         {voices.map(v => (
                           <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
                         ))}
                       </select>
-                      <p className="text-[9px] text-[var(--dim)] mt-0.5">{voices.length} voices detected</p>
+                      <p className="text-[9px] text-[var(--dim)] mt-0.5">
+                        {isVoicesLoading ? 'Scanning system for voices...' : `${voices.length} voices detected`}
+                      </p>
                     </div>
                     
                     <div>
