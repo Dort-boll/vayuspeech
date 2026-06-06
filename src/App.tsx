@@ -123,6 +123,8 @@ export default function App() {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const startTimeRef = useRef(0);
   const chromeBugRef = useRef<any>(null);
+  const scriptRef = useRef(script);
+  scriptRef.current = script;
   const vizRef = useRef<any>({
     bars: 64,
     smooth: Array(64).fill(0.015),
@@ -217,6 +219,31 @@ export default function App() {
       window.speechSynthesis.cancel();
     };
   }, []);
+
+  // Keyboard Shortcuts for Play, Pause, Stop
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (isPlaying) {
+          handlePause();
+        } else {
+          handlePlay();
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleStop();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, isPaused, wordIndex, script, pitch, rate, volume, selectedVoice, voices]);
 
   // Visualizer Loop
   useEffect(() => {
@@ -341,14 +368,24 @@ export default function App() {
   }, [isPlaying, selectedChar]);
 
   // Speech Handlers
-  const handlePlay = () => {
-    if (!script.trim()) {
+  const handlePlay = (
+    startWordIdx: number | unknown = 0,
+    voiceNameOverride?: string,
+    pitchOverride?: number,
+    rateOverride?: number,
+    volumeOverride?: number,
+    scriptOverride?: string
+  ) => {
+    const activeScript = scriptOverride ?? scriptRef.current;
+    if (!activeScript.trim()) {
       addToast('Please enter a script first', 'w');
       return;
     }
 
+    const actualStartIdx = typeof startWordIdx === 'number' ? startWordIdx : 0;
+
     try {
-      if (isPaused) {
+      if (isPaused && actualStartIdx === 0 && !voiceNameOverride && !pitchOverride && !rateOverride && !volumeOverride && !scriptOverride) {
         window.speechSynthesis.resume();
         setIsPaused(false);
         setIsPlaying(true);
@@ -356,32 +393,40 @@ export default function App() {
       }
 
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(script);
-      u.pitch = pitch;
-      u.rate = rate;
-      u.volume = volume;
+      
+      const wordsArray = activeScript.trim().split(/\s+/).filter(w => w.length > 0);
+      const totalWords = wordsArray.length;
+      
+      // Obtain the slice of script to speak
+      const textToSpeak = actualStartIdx > 0 && actualStartIdx < totalWords 
+        ? wordsArray.slice(actualStartIdx).join(' ') 
+        : activeScript;
 
-      const voice = voices.find(v => v.name === selectedVoice);
+      const u = new SpeechSynthesisUtterance(textToSpeak);
+      u.pitch = pitchOverride ?? pitch;
+      u.rate = rateOverride ?? rate;
+      u.volume = volumeOverride ?? volume;
+
+      const targetVoiceName = voiceNameOverride ?? selectedVoice;
+      const voice = voices.find(v => v.name === targetVoiceName);
       if (voice) u.voice = voice;
 
       u.onboundary = (e) => {
         if (e.name === 'word') {
-          const text = script.substring(e.charIndex).split(/\s+/)[0];
+          const text = textToSpeak.substring(e.charIndex).split(/\s+/)[0];
           setCurrentWord(text);
           
-          const wordsBefore = script.substring(0, e.charIndex).trim().split(/\s+/).filter(w => w.length > 0);
-          const currentIdx = wordsBefore.length;
-          setWordIndex(currentIdx);
+          const wordsBeforeInSlice = textToSpeak.substring(0, e.charIndex).trim().split(/\s+/).filter(w => w.length > 0);
+          const currentAbsoluteIdx = actualStartIdx + wordsBeforeInSlice.length;
+          setWordIndex(currentAbsoluteIdx);
           
           // Trigger visualizer pulse
           vizRef.current.pulse = 1.0;
           
           // Improve time accuracy based on word progress
-          const totalWords = getWordCount(script);
           if (totalWords > 0) {
-            const progressRatio = currentIdx / totalWords;
+            const progressRatio = currentAbsoluteIdx / totalWords;
             const estimatedElapsed = progressRatio * totalDuration;
-            // Only sync if significantly different to avoid jitter
             if (Math.abs(currentTime - estimatedElapsed) > 1) {
               setCurrentTime(estimatedElapsed);
             }
@@ -392,10 +437,11 @@ export default function App() {
       u.onstart = () => {
         setIsPlaying(true);
         setIsPaused(false);
-        startTimeRef.current = Date.now();
         
-        // Reset progress tracking
-        setCurrentTime(0);
+        // Calculate offset correct for actualStartIdx
+        const estimatedStartElapsed = totalWords > 0 ? (actualStartIdx / totalWords) * totalDuration : 0;
+        startTimeRef.current = Date.now() - (estimatedStartElapsed * 1000);
+        setCurrentTime(estimatedStartElapsed);
         
         if (chromeBugRef.current) clearInterval(chromeBugRef.current);
         chromeBugRef.current = window.setInterval(() => {
@@ -407,6 +453,10 @@ export default function App() {
       };
 
       u.onend = () => {
+        if (utteranceRef.current !== u) {
+          return;
+        }
+        
         setIsPlaying(false);
         setIsPaused(false);
         setCurrentWord('');
@@ -414,13 +464,13 @@ export default function App() {
         if (chromeBugRef.current) clearInterval(chromeBugRef.current);
         
         const newHistory = {
-          text: script,
+          text: activeScript,
           char: selectedChar?.name || 'Custom',
           color: selectedChar?.color || '#e89428',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          p: pitch,
-          r: rate,
-          v: volume
+          p: pitchOverride ?? pitch,
+          r: rateOverride ?? rate,
+          v: volumeOverride ?? volume
         };
         setHistory(prev => [newHistory, ...prev].slice(0, 15));
       };
@@ -440,15 +490,47 @@ export default function App() {
     }
   };
 
+  const restartSpeechFromCurrentWord = (
+    overrideVoice?: string,
+    overridePitch?: number,
+    overrideRate?: number,
+    overrideVolume?: number
+  ) => {
+    if (!isPlaying && !isPaused) return;
+    
+    utteranceRef.current = null;
+    window.speechSynthesis.cancel();
+    if (chromeBugRef.current) clearInterval(chromeBugRef.current);
+    
+    const curIdx = wordIndex >= 0 ? wordIndex : 0;
+    
+    setTimeout(() => {
+      handlePlay(
+        curIdx,
+        overrideVoice ?? selectedVoice,
+        overridePitch ?? pitch,
+        overrideRate ?? rate,
+        overrideVolume ?? volume
+      );
+    }, 150);
+  };
+
   const handlePause = () => {
     if (isPlaying) {
       window.speechSynthesis.pause();
       setIsPaused(true);
       setIsPlaying(false);
+      if (chromeBugRef.current) clearInterval(chromeBugRef.current);
     }
   };
 
   const handleStop = () => {
+    utteranceRef.current = null;
+    window.speechSynthesis.cancel();
+    // Pause + resume + cancel triggers browser reset on hung engines securely
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
     window.speechSynthesis.cancel();
     setIsPlaying(false);
     setIsPaused(false);
@@ -457,6 +539,7 @@ export default function App() {
     setWordIndex(-1);
     if (chromeBugRef.current) clearInterval(chromeBugRef.current);
   };
+
 
   const copyToClipboard = () => {
     if (!script.trim()) return;
@@ -497,6 +580,19 @@ export default function App() {
   }, [voices, langFilter]);
 
   const words = useMemo(() => script.split(/(\s+)/), [script]);
+
+  const wordsWithIndices = useMemo(() => {
+    let wordCount = 0;
+    return words.map((word) => {
+      const isWord = word.length > 0 && !word.match(/^\s+$/);
+      if (isWord) {
+        const index = wordCount;
+        wordCount++;
+        return { text: word, isWord, index };
+      }
+      return { text: word, isWord, index: -1 };
+    });
+  }, [words]);
 
   return (
     <div className="min-h-screen font-sans selection:bg-[var(--accent)] selection:text-black">
@@ -626,7 +722,7 @@ export default function App() {
             </button>
             
             <button 
-              onClick={isPlaying ? handlePause : handlePlay}
+              onClick={isPlaying ? handlePause : () => handlePlay()}
               className={`pb w-11 h-11 rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-transform shadow-xl ${!isPlaying && !isPaused ? 'idle' : ''}`}
               style={{ 
                 background: `linear-gradient(135deg, ${selectedChar?.color || '#e89428'}, ${selectedChar?.color ? selectedChar.color + 'dd' : '#c06a10'})`,
@@ -686,7 +782,20 @@ export default function App() {
                   setScript(ch.script);
                   // Try to find a matching voice
                   const bestVoice = voices.find(v => v.lang.startsWith('en') && (ch.id === 'morgan' || ch.id === 'shadow' ? /male|daniel|james/i.test(v.name) : /female|samantha|victoria/i.test(v.name)));
-                  if (bestVoice) setSelectedVoice(bestVoice.name);
+                  const targetVoiceName = bestVoice ? bestVoice.name : '';
+                  if (bestVoice) setSelectedVoice(targetVoiceName);
+
+                  if (isPlaying || isPaused) {
+                    utteranceRef.current = null;
+                    window.speechSynthesis.cancel();
+                    if (chromeBugRef.current) clearInterval(chromeBugRef.current);
+                    setIsPlaying(false);
+                    setIsPaused(false);
+                    // Settle slightly before playing the brand new character script
+                    setTimeout(() => {
+                      handlePlay(0, targetVoiceName, ch.p, ch.r, ch.v, ch.script);
+                    }, 120);
+                  }
                 }}
                 className={`cc snap-start ${selectedChar?.id === ch.id ? 'on' : ''}`}
               >
@@ -730,20 +839,27 @@ export default function App() {
               
               <div className="relative">
                 {isPlaying || isPaused ? (
-                  <div className="pv glass">
-                    {words.map((word, i) => {
-                      const isWord = !word.match(/^\s+$/);
-                      if (!isWord) return word;
-                      
-                      const wordsBefore = words.slice(0, i).filter(w => !w.match(/^\s+$/));
-                      const currentIdx = wordsBefore.length;
-                      
+                  <div 
+                    className="pv glass cursor-text select-all"
+                    onClick={() => {
+                      handleStop();
+                      setTimeout(() => {
+                        const ta = document.querySelector('.ed') as HTMLTextAreaElement;
+                        if (ta) {
+                          ta.focus();
+                        }
+                      }, 50);
+                    }}
+                    title="Click anywhere to edit"
+                  >
+                    {wordsWithIndices.map((item, i) => {
+                      if (!item.isWord) return item.text;
                       return (
                         <span 
                           key={i} 
-                          className={`wd ${currentIdx === wordIndex ? 'cur' : currentIdx < wordIndex ? 'past' : ''}`}
+                          className={`wd ${item.index === wordIndex ? 'cur' : item.index < wordIndex ? 'past' : ''}`}
                         >
-                          {word}
+                          {item.text}
                         </span>
                       );
                     })}
@@ -774,7 +890,19 @@ export default function App() {
                   {TEMPLATES.map(t => (
                     <button 
                       key={t.label}
-                      onClick={() => setScript(t.text)}
+                      onClick={() => {
+                        setScript(t.text);
+                        if (isPlaying || isPaused) {
+                          utteranceRef.current = null;
+                          window.speechSynthesis.cancel();
+                          if (chromeBugRef.current) clearInterval(chromeBugRef.current);
+                          setIsPlaying(false);
+                          setIsPaused(false);
+                          setTimeout(() => {
+                            handlePlay(0, selectedVoice, pitch, rate, volume, t.text);
+                          }, 150);
+                        }
+                      }}
                       className="tpl"
                     >
                       {t.label}
@@ -805,7 +933,13 @@ export default function App() {
                       <label className="text-[10px] font-medium text-[var(--muted)] uppercase tracking-wider mb-1.5 block">System Voice</label>
                       <select 
                         value={selectedVoice}
-                        onChange={(e) => setSelectedVoice(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedVoice(val);
+                          if (isPlaying) {
+                            restartSpeechFromCurrentWord(val, pitch, rate, volume);
+                          }
+                        }}
                         className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] rounded-lg p-2 text-xs outline-none focus:border-[var(--accent)] glass disabled:opacity-50"
                         disabled={isVoicesLoading}
                       >
@@ -824,7 +958,20 @@ export default function App() {
                         <label className="text-[10px] font-medium text-[var(--muted)] uppercase tracking-wider">Pitch</label>
                         <span className="text-[10px] font-mono text-[var(--accent)]">{pitch.toFixed(2)}</span>
                       </div>
-                      <input type="range" min="0" max="2" step="0.01" value={pitch} onChange={(e) => setPitch(parseFloat(e.target.value))} />
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="2" 
+                        step="0.01" 
+                        value={pitch} 
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setPitch(val);
+                          if (isPlaying) {
+                            restartSpeechFromCurrentWord(selectedVoice, val, rate, volume);
+                          }
+                        }} 
+                      />
                       <div className="flex justify-between text-[8px] text-[var(--dim)] mt-0.5"><span>Deep</span><span>Normal</span><span>High</span></div>
                     </div>
                     
@@ -833,7 +980,20 @@ export default function App() {
                         <label className="text-[10px] font-medium text-[var(--muted)] uppercase tracking-wider">Speed</label>
                         <span className="text-[10px] font-mono text-[var(--accent)]">{rate.toFixed(2)}</span>
                       </div>
-                      <input type="range" min="0.1" max="3" step="0.01" value={rate} onChange={(e) => setRate(parseFloat(e.target.value))} />
+                      <input 
+                        type="range" 
+                        min="0.1" 
+                        max="3" 
+                        step="0.01" 
+                        value={rate} 
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setRate(val);
+                          if (isPlaying) {
+                            restartSpeechFromCurrentWord(selectedVoice, pitch, val, volume);
+                          }
+                        }} 
+                      />
                       <div className="flex justify-between text-[8px] text-[var(--dim)] mt-0.5"><span>Slow</span><span>Normal</span><span>Fast</span></div>
                     </div>
                     
@@ -842,7 +1002,20 @@ export default function App() {
                         <label className="text-[10px] font-medium text-[var(--muted)] uppercase tracking-wider">Volume</label>
                         <span className="text-[10px] font-mono text-[var(--accent)]">{volume.toFixed(2)}</span>
                       </div>
-                      <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} />
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.01" 
+                        value={volume} 
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setVolume(val);
+                          if (isPlaying) {
+                            restartSpeechFromCurrentWord(selectedVoice, pitch, rate, val);
+                          }
+                        }} 
+                      />
                       <div className="flex justify-between text-[8px] text-[var(--dim)] mt-0.5"><span>Mute</span><span>Max</span></div>
                     </div>
                     
@@ -888,7 +1061,13 @@ export default function App() {
                       <label className="text-[10px] font-medium text-[var(--muted)] uppercase tracking-wider mb-1.5 block">Filtered Voices</label>
                       <select 
                         value={selectedVoice}
-                        onChange={(e) => setSelectedVoice(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedVoice(val);
+                          if (isPlaying) {
+                            restartSpeechFromCurrentWord(val, pitch, rate, volume);
+                          }
+                        }}
                         className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--fg)] rounded-lg p-2 text-xs outline-none focus:border-[var(--accent)] glass"
                       >
                         <option value="">Select a voice...</option>
@@ -905,7 +1084,7 @@ export default function App() {
                     </p>
                   </motion.div>
                 )}
-
+                
                 {activeTab === 'fx' && (
                   <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                     <p className="text-[9px] text-[var(--dim)] leading-relaxed flex items-start gap-1.5">
@@ -920,6 +1099,9 @@ export default function App() {
                             setPitch(fx.p);
                             setRate(fx.r);
                             addToast(`Effect applied: ${fx.label}`, 'i');
+                            if (isPlaying) {
+                              restartSpeechFromCurrentWord(selectedVoice, fx.p, fx.r, volume);
+                            }
                           }}
                           className="mb flex flex-col items-center justify-center h-auto py-2 glass"
                           title={fx.title}
