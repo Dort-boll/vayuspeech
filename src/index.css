@@ -39,50 +39,61 @@ body {
 
 .glass {
   background: var(--glass);
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  -webkit-transform: translate3d(0, 0, 0);
-  transform: translate3d(0, 0, 0);
-  will-change: backdrop-filter, -webkit-backdrop-filter;
 }
 
 .glass-card {
   background: rgba(18, 19, 24, 0.45);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 
-    0 8px 32px 0 rgba(0, 0, 0, 0.4),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  -webkit-transform: translate3d(0, 0, 0);
-  transform: translate3d(0, 0, 0);
-  will-change: backdrop-filter, -webkit-backdrop-filter;
+    0 12px 40px 0 rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
 }
 
 .glass-header {
-  background: rgba(4, 4, 8, 0.55);
-  backdrop-filter: blur(30px);
-  -webkit-backdrop-filter: blur(30px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.03);
-  -webkit-transform: translate3d(0, 0, 0);
-  transform: translate3d(0, 0, 0);
-  will-change: backdrop-filter, -webkit-backdrop-filter;
+  background: rgba(4, 4, 8, 0.6);
+  -webkit-backdrop-filter: blur(28px);
+  backdrop-filter: blur(28px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.02);
+}
+
+/* Fallbacks for browsers without backdrop-filter support */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: var(--surface) !important;
+  }
+}
+@supports not (-webkit-backdrop-filter: blur(1px)) {
+  .glass {
+    background: var(--surface) !important;
+  }
 }
 
 @supports not (backdrop-filter: blur(1px)) {
-  @supports not (-webkit-backdrop-filter: blur(1px)) {
-    .glass {
-      background: var(--surface) !important;
-    }
-    .glass-card {
-      background: var(--card) !important;
-    }
-    .glass-header {
-      background: var(--bg) !important;
-    }
+  .glass-card {
+    background: var(--card) !important;
+  }
+}
+@supports not (-webkit-backdrop-filter: blur(1px)) {
+  .glass-card {
+    background: var(--card) !important;
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-header {
+    background: var(--bg) !important;
+  }
+}
+@supports not (-webkit-backdrop-filter: blur(1px)) {
+  .glass-header {
+    background: var(--bg) !important;
   }
 }
 
