@@ -38,6 +38,7 @@ import {
   Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { AmbientWaves } from './components/AmbientWaves';
 
 // --- Constants ---
 
@@ -117,6 +118,32 @@ export default function App() {
   const [toasts, setToasts] = useState<{id: number, msg: string, type: 's' | 'e' | 'i' | 'w'}[]>([]);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isVoicesLoading, setIsVoicesLoading] = useState(true);
+
+  // Intro Landing State
+  const [hasEntered, setHasEntered] = useState(() => {
+    return sessionStorage.getItem('vayu-unlocked') === 'true';
+  });
+  const [dragX, setDragX] = useState(0);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [maxDrag, setMaxDrag] = useState(240);
+  const sliderWidthRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!hasEntered && sliderWidthRef.current) {
+      const handleResize = () => {
+        if (sliderWidthRef.current) {
+          setMaxDrag(sliderWidthRef.current.clientWidth - 44 - 12);
+        }
+      };
+      handleResize();
+      window.addEventListener('resize', handleResize);
+      const timer = setTimeout(handleResize, 150);
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        clearTimeout(timer);
+      };
+    }
+  }, [hasEntered]);
 
   // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -593,6 +620,181 @@ export default function App() {
       return { text: word, isWord, index: -1 };
     });
   }, [words]);
+
+  if (!hasEntered) {
+    return (
+      <div className={`min-h-screen relative flex flex-col items-center justify-between p-6 overflow-hidden ${theme === 'dark' ? 'bg-[#040408] text-white' : 'bg-[#f8f9fa] text-[#1a1b26]'}`}>
+        {/* Background Grid Pattern & Glowing Soundwave Waves */}
+        <div className="absolute inset-0 bg-grid-pattern opacity-40 pointer-events-none" />
+        <div className="orb-container">
+          <div className="orb orb-1 animate-pulse" style={{ animationDuration: '8s' }} />
+          <div className="orb orb-2 animate-pulse" style={{ animationDuration: '11s' }} />
+          <div className="orb orb-3 animate-pulse" style={{ animationDuration: '15s' }} />
+        </div>
+        <AmbientWaves theme={theme} />
+
+        {/* Toasts */}
+        <div className="fixed top-14 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
+          <AnimatePresence>
+            {toasts.map(t => (
+              <motion.div
+                key={t.id}
+                initial={{ opacity: 0, x: 50, scale: 0.9 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 20, scale: 0.9 }}
+                className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-2xl border pointer-events-auto min-w-[200px] ${
+                  t.type === 's' ? 'bg-[#0d2e1f] border-[#22c55e] text-white' :
+                  t.type === 'e' ? 'bg-[#351010] border-[#ef4444] text-white' :
+                  t.type === 'w' ? 'bg-[#351d04] border-[#e89428] text-white' :
+                  'bg-[#14263f] border-[#3b82f6] text-white'
+                }`}
+              >
+                {t.type === 's' && <CheckCircle2 size={16} className="text-[#22c55e]" />}
+                {t.type === 'e' && <AlertCircle size={16} className="text-[#ef4444]" />}
+                {t.type === 'w' && <AlertCircle size={16} className="text-[#e89428]" />}
+                {t.type === 'i' && <Info size={16} className="text-[#3b82f6]" />}
+                <span className="text-xs font-medium">{t.msg}</span>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+
+        {/* Intro Header */}
+        <header className="w-full max-w-5xl flex items-center justify-between relative z-10">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded bg-linear-to-br from-[#e89428] to-[#c06a10] flex items-center justify-center">
+              <Mic2 size={12} className="text-black" />
+            </div>
+            <span className="font-bold text-xs tracking-tight">Vayu <span className="text-[var(--muted)] font-normal text-[10px]">Speech</span></span>
+          </div>
+          
+          <button 
+            onClick={toggleTheme}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--muted)] hover:text-[var(--accent)] transition-all glass hover:bg-white/5"
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          >
+            {theme === 'dark' ? <Moon size={14} /> : <Zap size={14} />}
+          </button>
+        </header>
+
+        {/* Intro Card */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="max-w-md w-full p-8 rounded-3xl glass-card relative z-10 text-center flex flex-col items-center gap-6 border border-white/10"
+        >
+          <motion.div 
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', delay: 0.2 }}
+            className="w-16 h-16 rounded-2xl bg-linear-to-br from-[#e89428] to-[#c06a10] flex items-center justify-center shadow-xl shadow-[#e89428]/20"
+          >
+            <Mic2 size={32} className="text-black" />
+          </motion.div>
+
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight mb-2">
+              Vayu Speech Engine
+            </h1>
+            <p className="text-xs text-[var(--muted)] leading-relaxed max-w-sm mx-auto">
+              Experience pristine cinematic text-to-speech. Sculpt dynamic vocal waveforms with fully customized speed, rate, and space-grade audio effects.
+            </p>
+          </div>
+
+          {/* Feature badges */}
+          <div className="grid grid-cols-2 gap-2.5 w-full">
+            <div className="p-3 rounded-xl bg-black/20 dark:bg-black/20 bg-white/30 border border-white/5 text-left flex items-start gap-2.5">
+              <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 mt-0.5 shrink-0">
+                <Film size={12} />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold tracking-tight">8+ Personas</div>
+                <div className="text-[9px] text-[var(--muted)]">Unique voices</div>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-black/20 dark:bg-black/20 bg-white/30 border border-white/5 text-left flex items-start gap-2.5">
+              <div className="w-6 h-6 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400 mt-0.5 shrink-0">
+                <Wand2 size={12} />
+              </div>
+              <div>
+                <div className="text-[10px] font-bold tracking-tight">Modulations</div>
+                <div className="text-[9px] text-[var(--muted)]">Realtime fx</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Swipe to Unlock / Enter component */}
+          <div className="w-full mt-4 flex flex-col items-center gap-3">
+            <motion.div
+              ref={sliderWidthRef}
+              className="relative w-full h-[56px] rounded-full bg-black/30 dark:bg-black/30 bg-white/20 border border-white/10 dark:border-white/10 border-black/5 flex items-center p-1 overflow-hidden"
+            >
+              {/* Progress Fill */}
+              <motion.div 
+                className="absolute left-0 top-0 bottom-0 bg-linear-to-r from-[rgba(232,148,40,0.15)] to-[rgba(232,148,40,0.4)] pointer-events-none animate-pulse"
+                style={{ width: `${Math.max(12, dragX + 24)}px` }}
+              />
+              
+              {/* Guide text */}
+              <div 
+                className="absolute inset-0 flex items-center justify-center pointer-events-none text-[10px] font-bold uppercase tracking-widest text-[var(--muted)]"
+                style={{ opacity: Math.max(0, 1 - (dragX / maxDrag) * 1.5) }}
+              >
+                <span className="shimmer-text">Swipe to Activate</span>
+              </div>
+
+              {/* Handle */}
+              <motion.div
+                drag="x"
+                dragConstraints={{ left: 0, right: maxDrag }}
+                dragElastic={0.05}
+                dragMomentum={false}
+                onDrag={(event, info) => {
+                  setDragX(info.offset.x);
+                }}
+                onDragEnd={(event, info) => {
+                  if (info.offset.x >= maxDrag * 0.85) {
+                    setIsCompleted(true);
+                    setDragX(maxDrag);
+                    sessionStorage.setItem('vayu-unlocked', 'true');
+                    addToast('Voice Engine Activated', 's');
+                    setTimeout(() => {
+                      setHasEntered(true);
+                    }, 400);
+                  } else {
+                    setDragX(0);
+                  }
+                }}
+                animate={{ x: isCompleted ? maxDrag : dragX }}
+                transition={isCompleted ? { type: 'spring', stiffness: 200, damping: 20 } : { type: 'tween', duration: 0.1 }}
+                className="w-11 h-11 rounded-full bg-linear-to-r from-[#e89428] to-[#d07e18] flex items-center justify-center cursor-grab active:cursor-grabbing shadow-lg shadow-[#e89428]/30 z-10 shrink-0"
+              >
+                <FastForward size={14} className="text-black" />
+              </motion.div>
+            </motion.div>
+
+            <button 
+              onClick={() => {
+                sessionStorage.setItem('vayu-unlocked', 'true');
+                setHasEntered(true);
+                addToast('Voice Engine Activated', 's');
+              }}
+              className="text-[9px] text-[var(--muted)] hover:text-[var(--accent)] transition-colors tracking-wider uppercase font-semibold mt-1"
+            >
+              Or tap here to quick enter
+            </button>
+          </div>
+        </motion.div>
+
+        {/* Intro Footer */}
+        <footer className="w-full text-center relative z-10 py-2">
+          <span className="text-[10px] text-[var(--muted)] tracking-wider uppercase font-medium">Powered by Vayu Wave Synthesis</span>
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen font-sans selection:bg-[var(--accent)] selection:text-black">
